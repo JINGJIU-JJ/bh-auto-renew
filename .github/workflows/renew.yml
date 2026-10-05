@@ -2,7 +2,7 @@ name: bot-hosting auto renew
 
 on:
   schedule:
-    - cron: "0 5 * * *"
+    - cron: "0 5 * * *"                          # 北京时间 13:00 执行
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # ⬅️⬆️延长超时时间应对慢页面
+    timeout-minutes: 30                          # 延长超时时间应对慢页面
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +36,30 @@ jobs:
         run: |
           echo "GitHub Actions 服务器时间:" $(date '+%Y-%m-%d %H:%M:%S')
       
-      - name: Run renew
+      - name: Run renewal script
         env:
-          SESSION_TOKEN: ${{ secrets.SESSION
+          SESSION_TOKEN: ${{ secrets.SESSION_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SERVER: ${{ secrets.PROXY_SERVER || '' }}
+          HEADLESS: ${{ secrets.HEADLESS || 'true' }}
+        run: |
+          python renew.py
+      
+      - name: Upload screenshots (debug)
+        if: always()                              # 无论成功失败都上传截图
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-hosting-debug-screenshots
+          path: screenshots/
+          retention-days: 30
+
+      - name: Notify success (optional)
+        if: success()
+        run: |
+          echo "✅ 续约任务完成" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify failure (optional)
+        if: failure()
+        run: |
+          echo "❌ 续约任务失败" >> $GITHUB_STEP_SUMMARY
