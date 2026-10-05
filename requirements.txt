@@ -1,3 +1,4 @@
-seleniumbase>=4.18.0
-requests>=2.31.0
-python-dotenv>=1.0.0
+seleniumbase>=4.21.0
+requests
+python-dotenv
+playwright
