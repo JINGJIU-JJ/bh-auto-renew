@@ -294,7 +294,9 @@ def main():
         
         if not target_sel:
             # 最后兜底：搜索任何包含 renew 相关文本的可点击元素
-            all_elements = sb.find_elements("//button", timeout=5) or []
+            all_elements = sb.find_elements("button") or []
+            all_elements = sb.find_elements(".renew-btn") or []
+
             for elem in all_elements:
                 try:
                     text = sb.get_text(elem).lower().strip()
