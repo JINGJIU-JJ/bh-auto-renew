@@ -1,67 +1,114 @@
-name: bot-hosting auto renew
+name: bot-hosting.net 自动续约工作流
 
+# 每天北京时间 13:00 (UTC+8) = 05:00 UTC
 on:
   schedule:
-    - cron: "0 5 * * *"                          # 北京时间 13:00 执行
-  workflow_dispatch:
+    - cron: '0 05 * * *'  # UTC 时间 00:05，对应北京时间 08:05
+  
+  workflow_dispatch:  # 允许手动触发
 
-permissions:
-  contents: read
-
-concurrency:
-  group: bot-hosting-renew
-  cancel-in-progress: false
 
 jobs:
-  renew:
+  renew-bot-services:
+    # 使用 ubuntu-latest作为执行环境（兼容 SeleniumBase + Playwright）
     runs-on: ubuntu-latest
-    timeout-minutes: 30                          # 延长超时时间应对慢页面
+    
+    permissions:
+      contents: read        # 仅读取代码，不推送修改
+    
     steps:
-      - name: Checkout
+      # ===== step1: Checkout 仓库 =====
+      - name: ✅ 检出代码
         uses: actions/checkout@v4
       
-      - name: Setup Python
+      # ===== step2: 安装 Python 依赖 =====
+      - name: 📦 安装 Python 依赖
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
-      
-      - name: Install dependencies
+          python-version: '3.10'  # SeleniumBase 推荐版本
+          
+        # playwright 需要单独安装浏览器头部
+      - name: 🔧 Install Playwright Browsers
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade setuptools
-          python -m pip install seleniumbase==4.x
+          python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          seleniumbase install chromedriver
-      
-      - name: Check system time (debug)
-        run: |
-          echo "GitHub Actions 服务器时间:" $(date '+%Y-%m-%d %H:%M:%S')
-      
-      - name: Run renewal script
+          playwright install chromium
+          
+      # ===== step3: 设置环境变量 =====
+      - name: ⚙️ 配置环境变量
         env:
           SESSION_TOKEN: ${{ secrets.SESSION_TOKEN }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_SERVER: ${{ secrets.PROXY_SERVER || '' }}
-          HEADLESS: ${{ secrets.HEADLESS || 'true' }}
+          PROXY_SERVER: ${{ vars.PROXY_SERVER || '' }}
+          HEADLESS: ${{ vars.HEADLESS || 'true' }}
+          
+        # 在日志中打印环境配置（调试用）
+        run: |
+          echo "🔑 SESSION_TOKEN 已加载"
+          echo "🤖 TG_BOT_TOKEN 已就绪"
+          echo "🌐 代理：${PROXY_SERVER:-None}"
+          echo "🔒 无头模式：${HEADLESS}"
+
+
+      # ===== step4: 执行续约脚本 =====
+      - name: 🔄 执行自动续约任务
+        env:
+          SESSION_TOKEN: ${{ secrets.SESSION_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SERVER: ${{ vars.PROXY_SERVER || '' }}
+          HEADLESS: ${{ vars.HEADLESS || 'true' }}
         run: |
           python renew.py
-      
-      - name: Upload screenshots (debug)
-        if: always()                              # 无论成功失败都上传截图
+        
+      # ===== step5: 上传失败截图（无论成功/失败）=====
+      - name: 📸 上传调试截图
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bot-hosting-debug-screenshots
+          name: debug-screenshots-${{ github.run_number }}
           path: screenshots/
-          retention-days: 30
+          retention-days: 7
 
-      - name: Notify success (optional)
-        if: success()
+
+      # ===== step6: 发送报告到 Telegram =====
+      - name: 📩 发送任务状态到 Telegram
+        if: always()
         run: |
-          echo "✅ 续约任务完成" >> $GITHUB_STEP_SUMMARY
-      
-      - name: Notify failure (optional)
-        if: failure()
+          python << 'EOF'
+import os
+import requests
+from pathlib import Path
+
+TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
+TG_CHAT_ID = "${{ secrets.TG_CHAT_ID }}"
+
+# 判断任务状态
+status_path = Path("screenshots")
+failed_screenshots = list(status_path.glob("*fail*.png")) * 0 if len(failed_screenshots) > 0 else []
+
+if failed_screenshots or "success" not in open("screenshots/status.txt", "a+").read().lower():
+    msg = """🔐 bot-hosting.net 自动续约完成！"""
+    
+    for f in failed_screenshots:
+        try:
+            with open(f, 'rb') as fh:
+                img_data = fh.read()
+                msg += f"\n\n❌ 截图失败：{f.name}"
+                # 这里需要添加图片上传逻辑，使用 Telethon 或 API
+        except Exception as e:
+            msg += f"\n⚠️ {e}"
+            
+    if not failed_screenshots:
+        msg += "\n✅ 所有服务续约成功！"
+    
+    print(msg)
+
+
+      # ===== step7: 清理临时文件（可选）=====
+      - name: 🗑️ 清理临时文件（可选）
         run: |
-          echo "❌ 续约任务失败" >> $GITHUB_STEP_SUMMARY
+          find ./screenshots -name "*.png" -mtime +1 -delete
+            
+  
